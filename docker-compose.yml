@@ -1,7 +1,4 @@
-version: "3.9"
-
 services:
-  # ─── PostgreSQL ───────────────────────────────────────────────
   db:
     image: postgres:15-alpine
     restart: unless-stopped
@@ -19,7 +16,6 @@ services:
     networks:
       - internal
 
-  # ─── Django Backend ───────────────────────────────────────────
   backend:
     build:
       context: ./backend
@@ -47,7 +43,6 @@ services:
     networks:
       - internal
 
-  # ─── React Frontend ───────────────────────────────────────────
   frontend:
     build:
       context: ./frontend
@@ -55,13 +50,11 @@ services:
       args:
         REACT_APP_API_URL: /api
     restart: unless-stopped
+    depends_on:
+      - backend        # wait for backend to start before launching frontend
     networks:
       - internal
 
-  # ─── Nginx Reverse Proxy ──────────────────────────────────────
-  # entrypoint.sh handles the SSL bootstrap automatically:
-  #   - First boot  → HTTP-only config, waits for certbot cert, reloads to HTTPS
-  #   - Later boots → HTTPS config straight away (cert already in volume)
   nginx:
     build:
       context: ./nginx
@@ -84,9 +77,6 @@ services:
       - internal
       - external
 
-  # ─── Certbot ──────────────────────────────────────────────────
-  # On first boot: issues the certificate (nginx is already up on port 80)
-  # After that:    renews every 12 hours silently
   certbot:
     image: certbot/certbot:latest
     restart: unless-stopped
@@ -99,22 +89,18 @@ services:
     entrypoint: >
       /bin/sh -c "
         trap exit TERM;
-
-        # First-time issuance — only runs if cert does not exist yet
         if [ ! -f /etc/letsencrypt/live/$$DOMAIN/fullchain.pem ]; then
-          echo '[certbot] Issuing certificate for '$$DOMAIN'...'
-          certbot certonly \
-            --webroot \
-            --webroot-path=/var/www/certbot \
-            --non-interactive \
-            --agree-tos \
-            --email $$CERTBOT_EMAIL \
-            -d $$DOMAIN \
-            -d www.$$DOMAIN
-          echo '[certbot] Certificate issued.'
+          echo '[certbot] Issuing certificate for '$$DOMAIN'...';
+          certbot certonly
+            --webroot
+            --webroot-path=/var/www/certbot
+            --non-interactive
+            --agree-tos
+            --email $$CERTBOT_EMAIL
+            -d $$DOMAIN
+            -d www.$$DOMAIN;
+          echo '[certbot] Certificate issued.';
         fi;
-
-        # Auto-renewal loop every 12 hours
         while :; do
           sleep 12h & wait $${!};
           certbot renew --webroot --webroot-path=/var/www/certbot --quiet;
