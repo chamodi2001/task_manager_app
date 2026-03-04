@@ -82,6 +82,8 @@ services:
     restart: unless-stopped
     depends_on:
       - nginx
+    networks:
+      - internal
     volumes:
       - certbot_conf:/etc/letsencrypt
       - certbot_www:/var/www/certbot
