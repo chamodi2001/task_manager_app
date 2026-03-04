@@ -33,32 +33,6 @@ taskflow/
 └── .env.example           # All required environment variables
 ```
 
----
-
-## API Endpoints
-
-| Method | Path                  | Description              |
-|--------|-----------------------|--------------------------|
-| GET    | `/api/tasks/`         | List all tasks           |
-| POST   | `/api/tasks/`         | Create a task            |
-| GET    | `/api/tasks/{id}/`    | Get a single task        |
-| PATCH  | `/api/tasks/{id}/`    | Update a task            |
-| DELETE | `/api/tasks/{id}/`    | Delete a task            |
-| POST   | `/api/tasks/upload/`  | Upload a file to S3      |
-
-### Task Model
-
-| Field         | Type      | Notes                          |
-|---------------|-----------|--------------------------------|
-| id            | integer   | Auto-generated PK              |
-| title         | string    | Required, max 255 chars        |
-| description   | text      | Optional                       |
-| status        | string    | `todo` / `in_progress` / `done`|
-| attachment    | file      | Optional, stored on S3         |
-| created_at    | datetime  | Auto                           |
-| updated_at    | datetime  | Auto                           |
-
----
 
 ## Local Development
 
@@ -71,7 +45,7 @@ taskflow/
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/YOUR_USERNAME/task_manager_app.git
+git clone https://github.com/chamodi2001/task_manager_app.git
 cd taskflow
 
 # 2. Set up environment
@@ -87,7 +61,7 @@ docker compose up --build
 # Django Admin: http://localhost/admin/
 ```
 
----
+_________________________________________________---_________________________________________________
 
 ## AWS Deployment
 
@@ -99,7 +73,7 @@ sudo apt update && sudo apt install -y docker.io docker-compose-plugin git
 sudo usermod -aG docker ubuntu
 
 # Clone the repo
-sudo git clone https://github.com/YOUR_USERNAME/task_manager_app.git /opt/task_manager_app
+sudo git clone https://github.com/chamodi2001/task_manager_app.git /opt/task_manager_app
 sudo chown -R ubuntu:ubuntu /opt/taskflow
 
 # Copy and fill in .env
@@ -185,8 +159,8 @@ Go to **Settings → Secrets and variables → Actions → New repository secret
         "s3:ListBucket"
       ],
       "Resource": [
-        "arn:aws:s3:::YOUR-BUCKET-NAME",
-        "arn:aws:s3:::YOUR-BUCKET-NAME/*"
+        "arn:aws:s3:::BUCKET-NAME",
+        "arn:aws:s3:::BUCKET-NAME/*"
       ]
     }
   ]

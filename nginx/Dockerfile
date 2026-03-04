@@ -2,8 +2,12 @@ FROM nginx:1.25-alpine
 
 RUN apk add --no-cache bash
 
-COPY nginx.conf /etc/nginx/templates/default.conf.template
+# Both config templates — entrypoint picks the right one at runtime
+COPY nginx.http.conf  /etc/nginx/templates/nginx.http.conf.template
+COPY nginx.https.conf /etc/nginx/templates/nginx.https.conf.template
 
-# entrypoint uses envsubst to inject $DOMAIN at runtime
-CMD ["/bin/sh", "-c", \
-  "envsubst '${DOMAIN}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
+# Startup script — handles first boot (HTTP only) and subsequent boots (HTTPS)
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

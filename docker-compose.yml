@@ -38,7 +38,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
-      # ── S3 config (no keys — IAM Role on EC2 provides credentials) ──
       AWS_STORAGE_BUCKET_NAME: ${AWS_STORAGE_BUCKET_NAME}
       AWS_S3_REGION_NAME: ${AWS_S3_REGION_NAME:-us-east-1}
       USE_S3: ${USE_S3:-False}
@@ -60,6 +59,9 @@ services:
       - internal
 
   # ─── Nginx Reverse Proxy ──────────────────────────────────────
+  # entrypoint.sh handles the SSL bootstrap automatically:
+  #   - First boot  → HTTP-only config, waits for certbot cert, reloads to HTTPS
+  #   - Later boots → HTTPS config straight away (cert already in volume)
   nginx:
     build:
       context: ./nginx
@@ -74,27 +76,50 @@ services:
     environment:
       DOMAIN: ${DOMAIN}
     volumes:
-      - certbot_conf:/etc/letsencrypt:ro
-      - certbot_www:/var/www/certbot:ro
+      - certbot_conf:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
       - static_files:/app/staticfiles:ro
       - media_files:/app/media:ro
     networks:
       - internal
       - external
 
-  # ─── Certbot (SSL certificate + auto-renewal) ─────────────────
+  # ─── Certbot ──────────────────────────────────────────────────
+  # On first boot: issues the certificate (nginx is already up on port 80)
+  # After that:    renews every 12 hours silently
   certbot:
     image: certbot/certbot:latest
     restart: unless-stopped
     volumes:
       - certbot_conf:/etc/letsencrypt
       - certbot_www:/var/www/certbot
+    environment:
+      DOMAIN: ${DOMAIN}
+      CERTBOT_EMAIL: ${CERTBOT_EMAIL}
     entrypoint: >
-      /bin/sh -c "trap exit TERM;
-      while :; do
-        certbot renew --webroot --webroot-path=/var/www/certbot --quiet;
-        sleep 12h & wait $${!};
-      done"
+      /bin/sh -c "
+        trap exit TERM;
+
+        # First-time issuance — only runs if cert does not exist yet
+        if [ ! -f /etc/letsencrypt/live/$$DOMAIN/fullchain.pem ]; then
+          echo '[certbot] Issuing certificate for '$$DOMAIN'...'
+          certbot certonly \
+            --webroot \
+            --webroot-path=/var/www/certbot \
+            --non-interactive \
+            --agree-tos \
+            --email $$CERTBOT_EMAIL \
+            -d $$DOMAIN \
+            -d www.$$DOMAIN
+          echo '[certbot] Certificate issued.'
+        fi;
+
+        # Auto-renewal loop every 12 hours
+        while :; do
+          sleep 12h & wait $${!};
+          certbot renew --webroot --webroot-path=/var/www/certbot --quiet;
+        done
+      "
 
 volumes:
   postgres_data:
