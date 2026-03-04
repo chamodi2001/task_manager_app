@@ -80,26 +80,52 @@ services:
   certbot:
     image: certbot/certbot:latest
     restart: unless-stopped
+    depends_on:
+      - nginx
     volumes:
       - certbot_conf:/etc/letsencrypt
       - certbot_www:/var/www/certbot
     environment:
       DOMAIN: ${DOMAIN}
       CERTBOT_EMAIL: ${CERTBOT_EMAIL}
-    # Each command is a separate list item — no line continuation issues
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        trap exit TERM
+    entrypoint: >
+      /bin/sh -c "
+        trap exit TERM;
+
         if [ ! -f /etc/letsencrypt/live/$$DOMAIN/fullchain.pem ]; then
-          echo "[certbot] Issuing certificate for $$DOMAIN..."
-          certbot certonly --webroot --webroot-path=/var/www/certbot --non-interactive --agree-tos --email $$CERTBOT_EMAIL -d $$DOMAIN -d www.$$DOMAIN
-          echo "[certbot] Certificate issued."
-        fi
+          echo '[certbot] Waiting for nginx to be ready on port 80...';
+          until wget -q --spider http://nginx/.well-known/acme-challenge/test 2>/dev/null || \
+                wget -q --spider http://nginx/ 2>/dev/null || \
+                nc -z nginx 80 2>/dev/null; do
+            echo '[certbot] nginx not ready yet, retrying in 5s...';
+            sleep 5;
+          done;
+          echo '[certbot] nginx is up. Requesting certificate for '$$DOMAIN'...';
+
+          certbot certonly \
+            --webroot \
+            --webroot-path=/var/www/certbot \
+            --non-interactive \
+            --agree-tos \
+            --email $$CERTBOT_EMAIL \
+            -d $$DOMAIN \
+            -d www.$$DOMAIN;
+
+          if [ \$$? -eq 0 ]; then
+            echo '[certbot] Certificate issued successfully.';
+          else
+            echo '[certbot] ERROR: Certificate issuance failed. Check logs above.';
+          fi;
+        else
+          echo '[certbot] Certificate already exists. Skipping issuance.';
+        fi;
+
+        echo '[certbot] Entering renewal loop (every 12h)...';
         while :; do
-          sleep 12h & wait $!
-          certbot renew --webroot --webroot-path=/var/www/certbot --quiet
+          sleep 12h & wait \$${!};
+          certbot renew --webroot --webroot-path=/var/www/certbot --quiet;
         done
+      "
 
 volumes:
   postgres_data:
