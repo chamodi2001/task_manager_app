@@ -58,7 +58,7 @@ jobs:
               git fetch origin main
               git reset --hard origin/main
             else
-              git clone --branch main https://$HUB_TOKEN@github.com/YOUR_USERNAME/task_manager_app.git
+              git clone --branch main https://$HUB_TOKEN@github.com/chamodi2001/task_manager_app.git
               cd task_manager_app
             fi
 
