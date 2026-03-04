@@ -1,10 +1,5 @@
 version: "3.9"
 
-# In production (EC2), images are pulled from GHCR.
-# Locally, they are built from source.
-# The BACKEND_IMAGE / FRONTEND_IMAGE / NGINX_IMAGE env vars let
-# the CI/CD pipeline pin to an exact SHA-tagged image.
-
 services:
   # ─── PostgreSQL ───────────────────────────────────────────────
   db:
@@ -26,7 +21,6 @@ services:
 
   # ─── Django Backend ───────────────────────────────────────────
   backend:
-    image: ${BACKEND_IMAGE:-task-manager-app-backend:local}
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -44,8 +38,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      # ── S3 config (no keys — IAM Role on EC2 provides credentials) ──
       AWS_STORAGE_BUCKET_NAME: ${AWS_STORAGE_BUCKET_NAME}
       AWS_S3_REGION_NAME: ${AWS_S3_REGION_NAME:-us-east-1}
       USE_S3: ${USE_S3:-False}
@@ -57,7 +50,6 @@ services:
 
   # ─── React Frontend ───────────────────────────────────────────
   frontend:
-    image: ${FRONTEND_IMAGE:-task-manager-app-frontend:local}
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -69,7 +61,6 @@ services:
 
   # ─── Nginx Reverse Proxy ──────────────────────────────────────
   nginx:
-    image: ${NGINX_IMAGE:-task-manager-app-nginx:local}
     build:
       context: ./nginx
       dockerfile: Dockerfile
@@ -91,14 +82,13 @@ services:
       - internal
       - external
 
-  # ─── Certbot (SSL Auto-Renewal) ───────────────────────────────
+  # ─── Certbot (SSL certificate + auto-renewal) ─────────────────
   certbot:
     image: certbot/certbot:latest
     restart: unless-stopped
     volumes:
       - certbot_conf:/etc/letsencrypt
       - certbot_www:/var/www/certbot
-    # Renews every 12 h; first-time issuance done via init-ssl.sh
     entrypoint: >
       /bin/sh -c "trap exit TERM;
       while :; do

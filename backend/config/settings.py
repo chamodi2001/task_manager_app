@@ -74,7 +74,6 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 
-# Static & Media
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
@@ -95,17 +94,28 @@ REST_FRAMEWORK = {
     'PAGE_SIZE': 20,
 }
 
-# AWS S3
-AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID', default='')
-AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY', default='')
+# ── AWS S3 ────────────────────────────────────────────────────────────────────
+# In production: NO access keys are set here. boto3 automatically picks up
+# temporary credentials from the IAM Role attached to the EC2 instance via
+# the instance metadata service (IMDSv2). Nothing to rotate, nothing to leak.
+#
+# In local dev: USE_S3=False so this block is skipped entirely — files are
+# saved to /media on disk instead. If you do want to test S3 locally, you can
+# temporarily set AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY in your .env —
+# but this is not needed or recommended for normal local development.
+# ─────────────────────────────────────────────────────────────────────────────
 AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME', default='')
-AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME', default='us-east-1')
-AWS_S3_FILE_OVERWRITE = False
-AWS_DEFAULT_ACL = None
-AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com'
+AWS_S3_REGION_NAME      = config('AWS_S3_REGION_NAME', default='us-east-1')
+AWS_S3_FILE_OVERWRITE   = False
+AWS_DEFAULT_ACL         = None
 AWS_S3_OBJECT_PARAMETERS = {'CacheControl': 'max-age=86400'}
+
+# Only set custom domain when bucket name is known
+if AWS_STORAGE_BUCKET_NAME:
+    AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com'
 
 USE_S3 = config('USE_S3', default=False, cast=bool)
 if USE_S3:
     DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
     MEDIA_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/'
+    # No AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY — IAM Role handles auth
