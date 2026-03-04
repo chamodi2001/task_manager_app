@@ -51,7 +51,7 @@ services:
         REACT_APP_API_URL: /api
     restart: unless-stopped
     depends_on:
-      - backend        # wait for backend to start before launching frontend
+      - backend
     networks:
       - internal
 
@@ -86,26 +86,20 @@ services:
     environment:
       DOMAIN: ${DOMAIN}
       CERTBOT_EMAIL: ${CERTBOT_EMAIL}
-    entrypoint: >
-      /bin/sh -c "
-        trap exit TERM;
+    # Each command is a separate list item — no line continuation issues
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        trap exit TERM
         if [ ! -f /etc/letsencrypt/live/$$DOMAIN/fullchain.pem ]; then
-          echo '[certbot] Issuing certificate for '$$DOMAIN'...';
-          certbot certonly
-            --webroot
-            --webroot-path=/var/www/certbot
-            --non-interactive
-            --agree-tos
-            --email $$CERTBOT_EMAIL
-            -d $$DOMAIN
-            -d www.$$DOMAIN;
-          echo '[certbot] Certificate issued.';
-        fi;
+          echo "[certbot] Issuing certificate for $$DOMAIN..."
+          certbot certonly --webroot --webroot-path=/var/www/certbot --non-interactive --agree-tos --email $$CERTBOT_EMAIL -d $$DOMAIN -d www.$$DOMAIN
+          echo "[certbot] Certificate issued."
+        fi
         while :; do
-          sleep 12h & wait $${!};
-          certbot renew --webroot --webroot-path=/var/www/certbot --quiet;
+          sleep 12h & wait $!
+          certbot renew --webroot --webroot-path=/var/www/certbot --quiet
         done
-      "
 
 volumes:
   postgres_data:
