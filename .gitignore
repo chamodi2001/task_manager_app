@@ -2,6 +2,9 @@
 .env
 *.env.local
 
+# local docker compose file
+docker-compose.override.yml
+
 # Python
 __pycache__/
 *.py[cod]
