@@ -34,43 +34,53 @@ jobs:
           command_timeout: 30m
           script: |
 
+            # ──────────────────────────────────────────────────────────────
             echo "===== Checking Docker ====="
+            # ──────────────────────────────────────────────────────────────
             if ! command -v docker >/dev/null 2>&1; then
               echo "Docker not found. Installing..."
               sudo yum update -y
               sudo yum install -y docker
               sudo systemctl enable docker
               sudo systemctl start docker
+              # BUG FIX: add user to docker group — takes effect in new sessions,
+              # so we use 'sudo docker' commands throughout this script to avoid
+              # permission errors in the *current* SSH session.
               sudo usermod -aG docker ec2-user
             fi
 
+            # ──────────────────────────────────────────────────────────────
             echo "===== Installing Docker Compose v2 + Buildx ====="
-            # Always reinstall to guarantee we have a recent enough version
-            # (buildx 0.17+ is required by newer compose builds)
+            # ──────────────────────────────────────────────────────────────
             COMPOSE_VERSION="v2.27.0"
             BUILDX_VERSION="v0.17.0"
 
             sudo mkdir -p /usr/local/lib/docker/cli-plugins
 
-            # Docker Compose v2
-            sudo curl -SL \
+            sudo curl -fsSL \
               "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-x86_64" \
               -o /usr/local/lib/docker/cli-plugins/docker-compose
             sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
-            # Docker Buildx
-            sudo curl -SL \
+            sudo curl -fsSL \
               "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-amd64" \
               -o /usr/local/lib/docker/cli-plugins/docker-buildx
             sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
 
-            # Also expose as standalone docker-compose command
             sudo ln -sf /usr/local/lib/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose
 
-            echo "Docker Compose version: $(docker compose version)"
-            echo "Docker Buildx version:  $(docker buildx version)"
+            echo "Docker Compose version: $(sudo docker compose version)"
+            echo "Docker Buildx version:  $(sudo docker buildx version)"
 
+            # ──────────────────────────────────────────────────────────────
+            echo "===== Verifying EC2 Security Group — port 443 must be open ====="
+            # ──────────────────────────────────────────────────────────────
+            echo "Ports currently listening:"
+            sudo ss -tln | grep -E ':80|:443' || echo "WARNING: Neither port 80 nor 443 is bound yet — containers may not be running."
+
+            # ──────────────────────────────────────────────────────────────
             echo "===== Syncing code from GitHub ====="
+            # ──────────────────────────────────────────────────────────────
             cd /home/ec2-user
             if [ -d "task_manager_app" ]; then
               cd task_manager_app
@@ -80,31 +90,85 @@ jobs:
               git clone --branch main https://$HUB_TOKEN@github.com/chamodi2001/task_manager_app.git
               cd task_manager_app
             fi
+            pwd
 
+            # ──────────────────────────────────────────────────────────────
             echo "===== Writing .env file ====="
-            cat > .env << ENVFILE
-            DOMAIN=$DOMAIN
-            CERTBOT_EMAIL=$CERTBOT_EMAIL
-            DJANGO_SECRET_KEY=$DJANGO_SECRET_KEY
-            DEBUG=False
-            ALLOWED_HOSTS=$DOMAIN,www.$DOMAIN
-            CORS_ALLOWED_ORIGINS=https://$DOMAIN,https://www.$DOMAIN
-            POSTGRES_DB=$POSTGRES_DB
-            POSTGRES_USER=$POSTGRES_USER
-            POSTGRES_PASSWORD=$POSTGRES_PASSWORD
-            AWS_STORAGE_BUCKET_NAME=$AWS_STORAGE_BUCKET_NAME
-            AWS_S3_REGION_NAME=$AWS_S3_REGION_NAME
-            USE_S3=$USE_S3
-            ENVFILE
+            # ──────────────────────────────────────────────────────────────
+            # Fix: use printf to write each line explicitly, no heredoc indentation risk.
+            printf '%s\n' \
+              "DOMAIN=${DOMAIN}" \
+              "CERTBOT_EMAIL=${CERTBOT_EMAIL}" \
+              "DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}" \
+              "DEBUG=False" \
+              "ALLOWED_HOSTS=${DOMAIN},www.${DOMAIN}" \
+              "CORS_ALLOWED_ORIGINS=https://${DOMAIN},https://www.${DOMAIN}" \
+              "POSTGRES_DB=${POSTGRES_DB}" \
+              "POSTGRES_USER=${POSTGRES_USER}" \
+              "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}" \
+              "AWS_STORAGE_BUCKET_NAME=${AWS_STORAGE_BUCKET_NAME}" \
+              "AWS_S3_REGION_NAME=${AWS_S3_REGION_NAME}" \
+              "USE_S3=${USE_S3}" \
+              > .env
 
+            echo ".env written. Contents (redacted passwords):"
+            grep -v 'PASSWORD\|SECRET\|TOKEN' .env
+
+            # ──────────────────────────────────────────────────────────────
             echo "===== Deploying containers ====="
-            docker compose down
-            docker image prune -af
-            docker compose up -d --build
-            docker compose ps
+            # ──────────────────────────────────────────────────────────────
+            sudo docker compose down
+            sudo docker image prune -af
+            sudo docker compose up -d --build
+            sudo docker compose ps
 
-            echo "===== Running Django migrations ====="
-            docker compose exec -T backend python manage.py migrate --noinput
-            docker compose exec -T backend python manage.py collectstatic --noinput
+            # ──────────────────────────────────────────────────────────────
+            echo "===== Waiting for SSL certificate to be issued ====="
+            # ──────────────────────────────────────────────────────────────
+            # The certbot container runs after nginx starts and issues the cert via
+            # the ACME webroot challenge. The nginx entrypoint polls for the cert
+            # and switches from HTTP-only → HTTPS once it appears.
+            # We wait here (up to 3 minutes) before checking the result.
+            CERT_PATH="/var/lib/docker/volumes/$(basename $(pwd))_certbot_conf/_data/live/${DOMAIN}/fullchain.pem"
+            MAX_WAIT=180
+            WAITED=0
+            echo "Polling for cert at: $CERT_PATH"
+            while [ ! -f "$CERT_PATH" ] && [ "$WAITED" -lt "$MAX_WAIT" ]; do
+              echo "  [${WAITED}s] Certificate not yet present, waiting 10s..."
+              sleep 10
+              WAITED=$((WAITED + 10))
+            done
+
+            if [ -f "$CERT_PATH" ]; then
+              echo "Certificate issued successfully!"
+            else
+              echo "WARNING: Certificate not found after ${MAX_WAIT}s."
+              echo "Check certbot logs: sudo docker compose logs certbot"
+              echo "Common causes:"
+              echo "  1. Port 80 not open in EC2 Security Group inbound rules"
+              echo "  2. Domain DNS not pointing to this EC2 IP"
+              echo "  3. Rate limit hit (5 certs/domain/week on Let's Encrypt)"
+            fi
+
+            # ──────────────────────────────────────────────────────────────
+            echo "===== Verifying HTTPS is now live ====="
+            # ──────────────────────────────────────────────────────────────
+            echo "Ports listening after cert issuance:"
+            sudo ss -tln | grep -E ':80|:443'
+
+            echo "Checking certbot container logs (last 20 lines):"
+            sudo docker compose logs --tail=20 certbot
+
+            echo "Checking nginx container logs (last 20 lines):"
+            sudo docker compose logs --tail=20 nginx
+
+            # ──────────────────────────────────────────────────────────────
+            echo "===== All containers status ====="
+            # ──────────────────────────────────────────────────────────────
+            sudo docker compose ps
 
             echo "===== Deploy complete! ====="
+            echo "  HTTP  → https://${DOMAIN}  (should redirect to HTTPS)"
+            echo "  HTTPS → https://${DOMAIN}"
+            echo "  API   → https://${DOMAIN}/api/"
+            echo "  Admin → https://${DOMAIN}/admin/"
