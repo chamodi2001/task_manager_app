@@ -85,51 +85,11 @@ services:
     volumes:
       - certbot_conf:/etc/letsencrypt
       - certbot_www:/var/www/certbot
+      - ./certbot-entrypoint.sh:/certbot-entrypoint.sh:ro
     environment:
       DOMAIN: ${DOMAIN}
       CERTBOT_EMAIL: ${CERTBOT_EMAIL}
-    # Uses Python (available in certbot image) to wait for nginx on port 80
-    # instead of wget/nc which are not available in the certbot image.
-    entrypoint: >
-      /bin/sh -c "
-        trap exit TERM;
-
-        if [ ! -f /etc/letsencrypt/live/$$DOMAIN/fullchain.pem ]; then
-          echo '[certbot] Waiting for nginx to be ready on port 80...';
-          until python3 -c \"
-import socket, sys
-try:
-    s = socket.create_connection(('nginx', 80), timeout=3)
-    s.close()
-    sys.exit(0)
-except:
-    sys.exit(1)
-\" 2>/dev/null; do
-            echo '[certbot] nginx not ready yet, retrying in 5s...';
-            sleep 5;
-          done;
-
-          echo '[certbot] nginx is up. Requesting certificate for '$$DOMAIN'...';
-          certbot certonly \
-            --webroot \
-            --webroot-path=/var/www/certbot \
-            --non-interactive \
-            --agree-tos \
-            --email $$CERTBOT_EMAIL \
-            -d $$DOMAIN \
-            -d www.$$DOMAIN && \
-          echo '[certbot] Certificate issued successfully.' || \
-          echo '[certbot] ERROR: Certificate issuance failed. Check logs above.';
-        else
-          echo '[certbot] Certificate already exists. Skipping issuance.';
-        fi;
-
-        echo '[certbot] Entering renewal loop (every 12h)...';
-        while :; do
-          sleep 12h & wait \$${!};
-          certbot renew --webroot --webroot-path=/var/www/certbot --quiet;
-        done
-      "
+    entrypoint: ["/bin/sh", "/certbot-entrypoint.sh"]
 
 volumes:
   postgres_data:
