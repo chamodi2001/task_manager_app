@@ -85,7 +85,7 @@ services:
     volumes:
       - certbot_conf:/etc/letsencrypt
       - certbot_www:/var/www/certbot
-      - ./certbot-entrypoint.sh:/certbot-entrypoint.sh:ro
+      - ./nginx/certbot-entrypoint.sh:/certbot-entrypoint.sh:ro
     environment:
       DOMAIN: ${DOMAIN}
       CERTBOT_EMAIL: ${CERTBOT_EMAIL}
